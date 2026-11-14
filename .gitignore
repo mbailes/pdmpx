@@ -1,0 +1,7 @@
+pdmpx
+src/*.o
+__pycache__/
+*.pyc
+*.pdx
+*.png
+.DS_Store
