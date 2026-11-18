@@ -12,6 +12,7 @@ struct Result {
     float snr = 0;
     double dm = 0, period = 0;
     std::vector<float> snr_grid;              // [idm*np + ip]
+    std::vector<float> snr_grid_w;            // same, at the fixed width SearchConfig::fixw (if > 0)
     std::vector<float> best_profile;
 };
 
@@ -19,6 +20,7 @@ struct SearchConfig {
     int minwidth = 1, maxwidth = 0;           // bins (maxwidth 0 -> nbin/2)
     double rms = 1;
     bool keep_grid = false;
+    int fixw = 0;                             // > 0 (with keep_grid): also the S/N at this one width, same pass
 };
 
 // Brute-force grid in the Fourier domain: each profile is transformed once; a trial is a phase

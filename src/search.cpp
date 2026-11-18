@@ -45,6 +45,7 @@ Result search_grid(const Archive& a, const Grid& g, const SearchConfig& cfg)
 
     Result R;
     if (cfg.keep_grid) R.snr_grid.assign((size_t)g.ndm * g.np, 0.f);
+    if (cfg.keep_grid && cfg.fixw > 0) R.snr_grid_w.assign((size_t)g.ndm * g.np, 0.f);
     R.snr = -1;
 
     #pragma omp parallel
@@ -115,6 +116,10 @@ Result search_grid(const Archive& a, const Grid& g, const SearchConfig& cfg)
                     sn = smooth_mmw(tmp.data(), nbin, cfg.minwidth, maxw, (float)cfg.rms, &kw);
                 }
                 if (cfg.keep_grid) R.snr_grid[(size_t)i * g.np + j] = sn;
+                if (cfg.keep_grid && cfg.fixw > 0) {     // the fixed-width curve from the same dedispersed profile
+                    std::vector<float> tmp(prof);
+                    R.snr_grid_w[(size_t)i * g.np + j] = smooth_mmw(tmp.data(), nbin, cfg.fixw, cfg.fixw, (float)cfg.rms, nullptr);
+                }
                 if (sn > bsnr) { bsnr = sn; bi = i; bj = j; bw = kw; best_local = prof; }
             }
         }

@@ -27,7 +27,7 @@ static void usage()
          "search:\n"
          "  -mc N / -ms N / -mb N   scrunch to N channels / subints / bins first (default: <=32 channels)\n"
          "  -ds/-dr/-do  DM step / half-range / offset   -ps/-pr/-po  period step / half-range / offset (us)\n"
-         "  -turns T  half-range in turns of drift (default 1)   -natural  pdmp's own grid, no automatic scrunch\n"
+         "  -turns T  DM half-range in turns of delay across the band (default 1; period range = pdmp's)   -natural  pdmp's own grid, no automatic scrunch\n"
          "  -dmup X   never search more than X above the input DM (default 100; -1: no limit); never below DM 0\n"
          "  -mw S     minimum pulse width (s)   -binrot  whole-bin shifts, exactly as pdmp   -P S  period for PSRFITS without one\n"
          "batch / diagnostics:\n"

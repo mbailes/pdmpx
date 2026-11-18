@@ -68,7 +68,7 @@ static Grid make_grid(const Archive& a, const Options& o, double& refP, double& 
     double ds = o.ds, dr = o.dr, ps = o.ps, pr = o.pr;
     const bool user_dr = dr >= 0, user_ds = ds >= 0, user_pr = pr >= 0, user_ps = ps >= 0;
     double P0 = a.pfold[0];
-    if (!o.natural) {   // sensible grid: +-turns of drift, in DM across the band and in period over the observation
+    if (!o.natural) {   // sensible grid: +-turns of drift in DM across the band; period steps of one bin over the observation
         double fmin = 1e30, fmax = -1e30;
         for (int s = 0; s < a.nsub; s++)
             for (int c = 0; c < a.nchan; c++)
@@ -80,7 +80,7 @@ static Grid make_grid(const Archive& a, const Options& o, double& refP, double& 
             if (!user_ds) ds = 0.5 * (Pm / a.nbin) / D1;
         }
         if (!user_ps) ps = MICROSEC * Pm * (Pm / a.nbin) / tspan;
-        if (!user_pr) pr = MICROSEC * o.turns * Pm * Pm / tspan;
+        // period half-range: pdmp's own (below: one bin of drift within the middle subint); -turns sets the DM range only
     }
     {   // pdmp's natural values for anything still unset (getNatural..., setSensibleStepSizes)
         double cp_ms = P0 * MILLISEC, tbin = cp_ms / a.nbin, bwband = std::fabs(a.bandwidth / a.nchan), fc = a.centre_freq;
@@ -546,17 +546,26 @@ Row analyse_file(const std::string& file, const Options& o, Extra* ex)
         SearchConfig cw = cd; cw.minwidth = cw.maxwidth = W;
         double dmmax = std::max(2.0 * DM, g.dm0 + (g.ndm - 1) * g.ddm);
         Grid gd; gd.ndm = 401; gd.dm0 = 0; gd.ddm = dmmax > 0 ? dmmax / (gd.ndm - 1) : 1; gd.np = 1; gd.p0 = P; gd.dp = 0;
-        Result Rd = search_grid(ad, gd, cd), Rdw = search_grid(ad, gd, cw);
+        // The S/N-vs-DM curve (and the period curve below) run on the SEARCH channels (<= 32) at the best period, best
+        // width and fixed width W in one pass. On the nchan_disp channels they took ~90% of a single-threaded run.
+        // Far from the best DM the curve then carries intra-subband smearing; the model curve does not, so compare
+        // the two near the peak. The DM-0 interference test stays on the dispersion channels: one trial, and a
+        // zero-DM signal smeared within 32 subbands formed at the archive DM would look falsely dispersed.
+        SearchConfig ca = cfg; ca.keep_grid = true; ca.fixw = W;
+        Result Rd = search_grid(a, gd, ca);
+        const std::vector<float>& Rdw_grid = Rd.snr_grid_w;
         Grid g1; g1.ndm = 1; g1.dm0 = DM; g1.np = 1; g1.p0 = P;
         Result Rbw = search_grid(ad, g1, cw);                                   // fixed width at the best trial
-        double snr_dm0 = Rdw.snr_grid[0], snr_best_w = Rbw.snr;
+        Grid g0 = g1; g0.dm0 = 0;
+        Result R0 = search_grid(ad, g0, cw);                                    // fixed width at DM 0
+        double snr_dm0 = R0.snr, snr_best_w = Rbw.snr;
         std::vector<double> wsig(nch), fr(nch);
         for (int c = 0; c < nch; c++) { fr[c] = ad.f(nsub / 2, c); wsig[c] = std::isfinite(chs[c]) ? std::max(0.0, chs[c]) : 0.0; }
         if (std::accumulate(wsig.begin(), wsig.end(), 0.0) <= 0) for (int c = 0; c < nch; c++) wsig[c] = A.chanw[c];
         const double floor_ = noise_floor(nbin, W);
         auto model = [&](double ddm) { double l = dm_loss(ddm, fr, wsig, ad.centre_freq, P, nbin, W); return std::sqrt(std::pow(snr_best_w * l, 2) + floor_ * floor_); };
         {
-            const std::vector<float>& c = Rdw.snr_grid;
+            const std::vector<float>& c = Rdw_grid;
             const int n = (int)c.size();
             int imax = (int)(std::max_element(c.begin(), c.end()) - c.begin());
             // the main lobe: walk down from the peak until the curve stops falling or halves
@@ -573,7 +582,7 @@ Row analyse_file(const std::string& file, const Options& o, Extra* ex)
         row.set("disp_sigma", (snr_best_w - snr_dm0) / std::sqrt(2.0), "%.2f");
         // S/N vs period at the best DM, and S/N vs width
         Grid gp; gp.ndm = 1; gp.dm0 = DM; gp.np = std::max(2, 4 * g.np); gp.p0 = g.p0; gp.dp = g.np > 1 ? g.dp * (g.np - 1) / (gp.np - 1) : 0;
-        Result Rp = search_grid(ad, gp, cd), Rpw = search_grid(ad, gp, cw);
+        Result Rp = search_grid(a, gp, ca);
         std::vector<float> wc;
         for (int kw = cfg.minwidth; kw <= nbin / 2 && kw <= 0.9 * nbin; ) {
             std::vector<float> tmp(R.best_profile);
@@ -606,10 +615,10 @@ Row analyse_file(const std::string& file, const Options& o, Extra* ex)
             v.assign(ad.dur.begin(), ad.dur.end()); B.add("dur", 1, nsub, v);
             B.add("grid", g.ndm, g.np, R.snr_grid);
             v.clear();
-            for (int i = 0; i < gd.ndm; i++) { double d = gd.dm0 + i * gd.ddm; v.push_back((float)d); v.push_back(Rd.snr_grid[i]); v.push_back(Rdw.snr_grid[i]); v.push_back((float)model(d - DM)); }
+            for (int i = 0; i < gd.ndm; i++) { double d = gd.dm0 + i * gd.ddm; v.push_back((float)d); v.push_back(Rd.snr_grid[i]); v.push_back(Rdw_grid[i]); v.push_back((float)model(d - DM)); }
             B.add("dmcurve", gd.ndm, 4, v);
             v.clear();
-            for (int j = 0; j < gp.np; j++) { v.push_back((float)((gp.p0 + j * gp.dp - P) * 1e6)); v.push_back(Rp.snr_grid[j]); v.push_back(Rpw.snr_grid[j]); }
+            for (int j = 0; j < gp.np; j++) { v.push_back((float)((gp.p0 + j * gp.dp - P) * 1e6)); v.push_back(Rp.snr_grid[j]); v.push_back(Rp.snr_grid_w[j]); }
             B.add("pcurve", gp.np, 3, v);
             B.add("wcurve", (int)wc.size() / 2, 2, wc);
             v.assign(sp.begin(), sp.end()); B.add("sp_on", 1, nsub, v);
